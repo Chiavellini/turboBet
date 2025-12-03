@@ -1,0 +1,26 @@
+# Python version: 3.9.6
+
+# Core HTTP/API libraries
+requests==2.32.3
+urllib3==2.2.1
+certifi==2024.7.4
+charset-normalizer==3.3.2
+idna==3.7
+
+# Data processing (required for nba_scraper.py)
+pandas==2.2.2
+numpy==1.26.4
+python-dateutil==2.9.0.post0
+
+# Timezone handling (for correct date/time conversions)
+pytz==2024.1
+
+# Visualization
+matplotlib==3.8.4
+seaborn==0.13.2
+
+# PySpark for distributed computing and ML
+pyspark==3.5.1
+
+# Optional (if using .env files)
+python-dotenv==1.0.1
