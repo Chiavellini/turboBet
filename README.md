@@ -84,6 +84,12 @@ python3 visualize_predictions.py
 
 ### 🚀 Single Command (Run Everything)
 
+**Option 0: Fresh Start (no CSVs or PNGs yet)**:
+
+```bash
+cd /Users/bernardodelrio/Desktop/turboBet/pipeline/scrapers && python3 fetch_teams.py && python3 fetch_odds.py --auto && cd ../models && python3 calculate_ponderations.py && cd ../bets && python3 visualize_bet_values.py && cd ../..
+```
+
 **Option 1: One-Liner** (copy-paste entire line):
 
 ```bash
