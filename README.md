@@ -246,6 +246,9 @@ rm -f pipeline/data/*.csv
 # (2)
 rm -f pipeline/bets/*.png
 
-
 # run
 python3 pipeline/scrapers/fetch_teams.py && python3 pipeline/scrapers/fetch_odds.py --auto && python3 pipeline/models/calculate_ponderations.py && python3 pipeline/bets/visualize_bet_values.py
+# en caso de ya tener los csvs al dia:
+python3 pipeline/models/calculate_ponderations.py && python3 pipeline/bets/visualize_bet_values.py
+# ya teniendo las ponderaciones: namas queremos visualización
+python3 pipeline/bets/visualize_bet_values.py
