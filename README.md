@@ -234,3 +234,18 @@ turbobet/                           ← Project root
 
 Private project for data analysis and research purposes.
 
+
+
+## Delete and run all commands (using bash)
+
+# delete 
+rm -f pipeline/bets/*.png pipeline/data/*.csv
+# en caso de solo tener los csvs (1) ó solo tener los pngs (1)
+# (1)
+rm -f pipeline/data/*.csv
+# (2)
+rm -f pipeline/bets/*.png
+
+
+# run
+python3 pipeline/scrapers/fetch_teams.py && python3 pipeline/scrapers/fetch_odds.py --auto && python3 pipeline/models/calculate_ponderations.py && python3 pipeline/bets/visualize_bet_values.py

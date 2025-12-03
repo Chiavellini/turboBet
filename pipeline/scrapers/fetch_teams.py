@@ -3,6 +3,7 @@ import pandas as pd
 import time
 import os
 from datetime import datetime
+from requests.exceptions import RequestException, Timeout, ConnectionError
 
 # NBA team IDs (all 30 teams)
 NBA_TEAM_IDS = {
@@ -39,6 +40,47 @@ NBA_TEAM_IDS = {
 }
 
 
+def fetch_with_retry(url, headers, params, max_retries=3, timeout=30, retry_delay=2):
+    """
+    Fetch data from API with retry logic and exponential backoff.
+    
+    Args:
+        url: API endpoint URL
+        headers: Request headers
+        params: Request parameters
+        max_retries: Maximum number of retry attempts (default: 3)
+        timeout: Request timeout in seconds (default: 30)
+        retry_delay: Initial delay between retries in seconds (default: 2)
+    
+    Returns:
+        Response object if successful, None if all retries fail
+    """
+    for attempt in range(max_retries):
+        try:
+            response = requests.get(
+                url, headers=headers, params=params, timeout=timeout
+            )
+            response.raise_for_status()
+            return response
+        except (Timeout, ConnectionError) as e:
+            if attempt < max_retries - 1:
+                wait_time = retry_delay * (2 ** attempt)  # Exponential backoff
+                print(f"  ⚠ Attempt {attempt + 1} failed: {type(e).__name__}. Retrying in {wait_time}s...")
+                time.sleep(wait_time)
+            else:
+                print(f"  ✗ All {max_retries} attempts failed: {type(e).__name__}")
+                return None
+        except RequestException as e:
+            # For other HTTP errors (4xx, 5xx), don't retry
+            print(f"  ✗ HTTP error: {e}")
+            return None
+        except Exception as e:
+            print(f"  ✗ Unexpected error: {e}")
+            return None
+    
+    return None
+
+
 def get_team_stats(team_id, season='2025-26'):
     """
     Fetch team stats from NBA.com API including days rest splits
@@ -69,56 +111,57 @@ def get_team_stats(team_id, season='2025-26'):
         'VsConference': '', 'VsDivision': ''
     }
 
+    response = fetch_with_retry(url_general, headers, params_general)
+    if response is None:
+        print(f"Error fetching general stats for team {team_id}: All retry attempts failed")
+        return None
+    
     try:
-        response = requests.get(
-            url_general, headers=headers, params=params_general, timeout=10)
-        response.raise_for_status()
         data = response.json()
-
         if data['resultSets'] and len(data['resultSets']) > 0:
             headers_list = data['resultSets'][0]['headers']
             rows = data['resultSets'][0]['rowSet']
             if rows:
                 team_data = dict(zip(headers_list, rows[0]))
     except Exception as e:
-        print(f"Error fetching general stats for team {team_id}: {e}")
+        print(f"Error parsing general stats for team {team_id}: {e}")
         return None
 
-    time.sleep(0.3)  # Small delay between API calls
+    time.sleep(0.5)  # Small delay between API calls
 
     # 2. Get opponent stats (defensive stats)
     url_opp = "https://stats.nba.com/stats/teamdashboardbygeneralsplits"
     params_opp = params_general.copy()
     params_opp['MeasureType'] = 'Opponent'  # Get opponent stats (defense)
 
-    try:
-        response = requests.get(url_opp, headers=headers,
-                                params=params_opp, timeout=10)
-        response.raise_for_status()
-        data = response.json()
+    response = fetch_with_retry(url_opp, headers, params_opp)
+    if response is not None:
+        try:
+            data = response.json()
+            if data['resultSets'] and len(data['resultSets']) > 0:
+                headers_list = data['resultSets'][0]['headers']
+                rows = data['resultSets'][0]['rowSet']
+                if rows:
+                    opp_data = dict(zip(headers_list, rows[0]))
 
-        if data['resultSets'] and len(data['resultSets']) > 0:
-            headers_list = data['resultSets'][0]['headers']
-            rows = data['resultSets'][0]['rowSet']
-            if rows:
-                opp_data = dict(zip(headers_list, rows[0]))
+                    # Opponent stats already have OPP_ prefix in the API
+                    team_data['OPP_PTS'] = opp_data.get('OPP_PTS', 0)
+                    team_data['OPP_FG_PCT'] = opp_data.get('OPP_FG_PCT', 0)
+                    team_data['OPP_FG3_PCT'] = opp_data.get('OPP_FG3_PCT', 0)
+                    team_data['OPP_FT_PCT'] = opp_data.get('OPP_FT_PCT', 0)
+                    team_data['OPP_REB'] = opp_data.get('OPP_REB', 0)
+                    team_data['OPP_AST'] = opp_data.get('OPP_AST', 0)
+                    team_data['OPP_TOV'] = opp_data.get('OPP_TOV', 0)
+                    print(
+                        f"  ✓ Opponent stats fetched (OPP_PTS: {team_data['OPP_PTS']:.1f})")
+                else:
+                    print(f"  Warning: No opponent stat rows found")
+        except Exception as e:
+            print(f"  Error parsing opponent stats for team {team_id}: {e}")
+    else:
+        print(f"  Warning: Failed to fetch opponent stats for team {team_id}")
 
-                # Opponent stats already have OPP_ prefix in the API
-                team_data['OPP_PTS'] = opp_data.get('OPP_PTS', 0)
-                team_data['OPP_FG_PCT'] = opp_data.get('OPP_FG_PCT', 0)
-                team_data['OPP_FG3_PCT'] = opp_data.get('OPP_FG3_PCT', 0)
-                team_data['OPP_FT_PCT'] = opp_data.get('OPP_FT_PCT', 0)
-                team_data['OPP_REB'] = opp_data.get('OPP_REB', 0)
-                team_data['OPP_AST'] = opp_data.get('OPP_AST', 0)
-                team_data['OPP_TOV'] = opp_data.get('OPP_TOV', 0)
-                print(
-                    f"  ✓ Opponent stats fetched (OPP_PTS: {team_data['OPP_PTS']:.1f})")
-            else:
-                print(f"  Warning: No opponent stat rows found")
-    except Exception as e:
-        print(f"  Error fetching opponent stats for team {team_id}: {e}")
-
-    time.sleep(0.3)
+    time.sleep(0.5)
 
     # 3. Get days rest splits by analyzing game log
     url_gamelog = "https://stats.nba.com/stats/teamgamelog"
@@ -131,97 +174,97 @@ def get_team_stats(team_id, season='2025-26'):
         'TeamID': team_id
     }
 
-    try:
-        response = requests.get(
-            url_gamelog, headers=headers, params=params_gamelog, timeout=10)
-        response.raise_for_status()
-        data = response.json()
+    response = fetch_with_retry(url_gamelog, headers, params_gamelog)
+    if response is not None:
+        try:
+            data = response.json()
 
-        if data.get('resultSets') and len(data['resultSets']) > 0:
-            headers_list = data['resultSets'][0]['headers']
-            game_rows = data['resultSets'][0]['rowSet']
+            if data.get('resultSets') and len(data['resultSets']) > 0:
+                headers_list = data['resultSets'][0]['headers']
+                game_rows = data['resultSets'][0]['rowSet']
 
-            if game_rows:
-                from datetime import datetime, timedelta
+                if game_rows:
+                    from datetime import datetime, timedelta
 
-                # Organize by days rest
-                rest_buckets = {'0': [], '1': [], '2': [], '3': [], '4+': []}
-                prev_date = None
+                    # Organize by days rest
+                    rest_buckets = {'0': [], '1': [], '2': [], '3': [], '4+': []}
+                    prev_date = None
 
-                # Sort games by date (most recent first in API, so reverse)
-                game_rows_sorted = sorted(
-                    game_rows, key=lambda x: x[headers_list.index('GAME_DATE')])
+                    # Sort games by date (most recent first in API, so reverse)
+                    game_rows_sorted = sorted(
+                        game_rows, key=lambda x: x[headers_list.index('GAME_DATE')])
 
-                for game in game_rows_sorted:
-                    game_dict = dict(zip(headers_list, game))
-                    game_date_str = game_dict.get('GAME_DATE', '')
+                    for game in game_rows_sorted:
+                        game_dict = dict(zip(headers_list, game))
+                        game_date_str = game_dict.get('GAME_DATE', '')
 
-                    if game_date_str and prev_date:
-                        # Calculate days rest
-                        game_date = datetime.strptime(
-                            game_date_str, '%b %d, %Y')
-                        # -1 because game day doesn't count
-                        days_rest = (game_date - prev_date).days - 1
+                        if game_date_str and prev_date:
+                            # Calculate days rest
+                            game_date = datetime.strptime(
+                                game_date_str, '%b %d, %Y')
+                            # -1 because game day doesn't count
+                            days_rest = (game_date - prev_date).days - 1
 
-                        # Categorize
-                        if days_rest == 0:
-                            bucket = '0'
-                        elif days_rest == 1:
-                            bucket = '1'
-                        elif days_rest == 2:
-                            bucket = '2'
-                        elif days_rest == 3:
-                            bucket = '3'
-                        else:  # 4+
-                            bucket = '4+'
+                            # Categorize
+                            if days_rest == 0:
+                                bucket = '0'
+                            elif days_rest == 1:
+                                bucket = '1'
+                            elif days_rest == 2:
+                                bucket = '2'
+                            elif days_rest == 3:
+                                bucket = '3'
+                            else:  # 4+
+                                bucket = '4+'
 
-                        rest_buckets[bucket].append(game_dict)
+                            rest_buckets[bucket].append(game_dict)
 
-                    if game_date_str:
-                        prev_date = datetime.strptime(
-                            game_date_str, '%b %d, %Y')
+                        if game_date_str:
+                            prev_date = datetime.strptime(
+                                game_date_str, '%b %d, %Y')
 
-                # Calculate stats for each rest bucket
-                for rest_days, games in rest_buckets.items():
-                    if games:
-                        rest_label = rest_days.replace('+', 'plus')
-                        prefix = f"REST_{rest_label}_"
+                    # Calculate stats for each rest bucket
+                    for rest_days, games in rest_buckets.items():
+                        if games:
+                            rest_label = rest_days.replace('+', 'plus')
+                            prefix = f"REST_{rest_label}_"
 
-                        gp = len(games)
-                        wins = sum(1 for g in games if g.get('WL') == 'W')
-                        losses = gp - wins
-                        w_pct = wins / gp if gp > 0 else 0
-                        avg_pts = sum(g.get('PTS', 0)
-                                      for g in games) / gp if gp > 0 else 0
-                        avg_plus_minus = sum(g.get('PLUS_MINUS', 0)
-                                             for g in games) / gp if gp > 0 else 0
+                            gp = len(games)
+                            wins = sum(1 for g in games if g.get('WL') == 'W')
+                            losses = gp - wins
+                            w_pct = wins / gp if gp > 0 else 0
+                            avg_pts = sum(g.get('PTS', 0)
+                                          for g in games) / gp if gp > 0 else 0
+                            avg_plus_minus = sum(g.get('PLUS_MINUS', 0)
+                                                 for g in games) / gp if gp > 0 else 0
 
-                        team_data[f"{prefix}GP"] = gp
-                        team_data[f"{prefix}W"] = wins
-                        team_data[f"{prefix}L"] = losses
-                        team_data[f"{prefix}W_PCT"] = w_pct
-                        team_data[f"{prefix}PTS"] = avg_pts
-                        team_data[f"{prefix}PLUS_MINUS"] = avg_plus_minus
+                            team_data[f"{prefix}GP"] = gp
+                            team_data[f"{prefix}W"] = wins
+                            team_data[f"{prefix}L"] = losses
+                            team_data[f"{prefix}W_PCT"] = w_pct
+                            team_data[f"{prefix}PTS"] = avg_pts
+                            team_data[f"{prefix}PLUS_MINUS"] = avg_plus_minus
 
-                        print(
-                            f"  ✓ Rest {rest_days} days: {gp} GP, {w_pct:.3f} W%, {avg_pts:.1f} PTS")
-                    else:
-                        # No games in this bucket
-                        rest_label = rest_days.replace('+', 'plus')
-                        prefix = f"REST_{rest_label}_"
-                        team_data[f"{prefix}GP"] = 0
-                        team_data[f"{prefix}W"] = 0
-                        team_data[f"{prefix}L"] = 0
-                        team_data[f"{prefix}W_PCT"] = 0
-                        team_data[f"{prefix}PTS"] = 0
-                        team_data[f"{prefix}PLUS_MINUS"] = 0
+                            print(
+                                f"  ✓ Rest {rest_days} days: {gp} GP, {w_pct:.3f} W%, {avg_pts:.1f} PTS")
+                        else:
+                            # No games in this bucket
+                            rest_label = rest_days.replace('+', 'plus')
+                            prefix = f"REST_{rest_label}_"
+                            team_data[f"{prefix}GP"] = 0
+                            team_data[f"{prefix}W"] = 0
+                            team_data[f"{prefix}L"] = 0
+                            team_data[f"{prefix}W_PCT"] = 0
+                            team_data[f"{prefix}PTS"] = 0
+                            team_data[f"{prefix}PLUS_MINUS"] = 0
 
-                print(f"  ✓ Days rest analysis complete")
-            else:
-                print(f"  Warning: No game log data found")
-
-    except Exception as e:
-        print(f"  Error analyzing days rest: {str(e)[:60]}")
+                    print(f"  ✓ Days rest analysis complete")
+                else:
+                    print(f"  Warning: No game log data found")
+        except Exception as e:
+            print(f"  Error analyzing days rest: {str(e)[:60]}")
+    else:
+        print(f"  Warning: Failed to fetch game log for team {team_id}")
 
     return team_data if team_data else None
 
@@ -249,8 +292,8 @@ def scrape_all_teams(season='2025-26', output_file='nba_team_stats.csv'):
         else:
             print(f"✗ {team_name} - Failed")
 
-        # Be respectful to NBA.com servers
-        time.sleep(0.6)
+        # Be respectful to NBA.com servers - increased delay to reduce rate limiting
+        time.sleep(1.0)
 
     # Convert to DataFrame
     df = pd.DataFrame(all_stats)

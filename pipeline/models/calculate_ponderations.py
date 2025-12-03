@@ -188,9 +188,11 @@ def calculate_matchup_predictions(odds, away_ratings, home_ratings):
     )
 
     # Calculate value indicators (difference between predicted and sportsbook odds)
+    # Note: sportsbook spread uses opposite sign convention (negative = home favored)
+    # So we need to flip the sign: predicted (positive = home favored) vs -spread
     predictions = predictions.withColumn(
         "spread_difference",
-        F.col("spread") - F.col("predicted_point_diff")
+        F.col("predicted_point_diff") + F.col("spread")
     ).withColumn(
         "total_difference",
         F.col("total") - F.col("predicted_total_points")
