@@ -6,8 +6,13 @@ __pycache__/
 # macOS cruft
 .DS_Store
 
-# Virtual environments
+# Virtual environments (common names)
 venv/
+.venv/
+env/
+.env/
+*/venv/
+*/.venv/
 
 # Generated data outputs
 pipeline/data/*
